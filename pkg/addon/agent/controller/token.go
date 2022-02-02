@@ -33,13 +33,27 @@ type TokenReconciler struct {
 	SpokeNativeClient kubernetes.Interface
 	SpokeClientConfig *rest.Config
 	SpokeNamespace    string
+	ClusterName       string
+	SpokeCache        cache.Cache
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TokenReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authv1alpha1.ManagedServiceAccount{}).
-		Watches(&source.Kind{Type: &corev1.Secret{}}, event.NewSecretEventHandler()).
+		Watches(
+			&source.Kind{
+				Type: &corev1.Secret{},
+			},
+			event.NewSecretEventHandler(),
+		).
+		Watches(
+			source.NewKindWithCache(
+				&corev1.ServiceAccount{},
+				r.SpokeCache,
+			),
+			event.NewServiceAccountEventHandler(r.ClusterName),
+		).
 		Complete(r)
 }
 
@@ -47,11 +61,22 @@ func (r *TokenReconciler) Reconcile(ctx context.Context, request reconcile.Reque
 	logger := log.FromContext(ctx)
 	logger.Info("Start reconciling")
 	managed := &authv1alpha1.ManagedServiceAccount{}
+
 	if err := r.Cache.Get(ctx, request.NamespacedName, managed); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return reconcile.Result{}, errors.Wrapf(err, "no such managed service account")
+			//fail to get managed-serviceaccount, requeue
+			return reconcile.Result{}, errors.Wrapf(err, "fail to get managed serviceaccount")
 		}
-		logger.Info("No such resource")
+
+		sai := r.SpokeNativeClient.CoreV1().ServiceAccounts(r.SpokeNamespace)
+		if err := sai.Delete(ctx, request.Name, metav1.DeleteOptions{}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				//fail to delete related serviceaccount, requeue
+				return reconcile.Result{}, errors.Wrapf(err, "fail to delete related serviceaccount")
+			}
+		}
+
+		logger.Info("Both ManagedServiceAccount and related ServiceAccount does not exist")
 		return reconcile.Result{}, nil
 	}
 

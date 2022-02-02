@@ -207,7 +207,7 @@ func newAddonAgentRole(namespace string) *rbacv1.Role {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"serviceaccounts", "serviceaccounts/token"},
-				Verbs:     []string{"create"},
+				Verbs:     []string{"get", "watch", "list", "create", "delete"},
 			},
 			{
 				APIGroups: []string{"authentication.k8s.io"},
